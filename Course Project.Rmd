@@ -1,0 +1,85 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+---
+title: "Machine Learning Approach to Human Activity Recognition"
+author: "Matt Moocarme"
+date: "August 23, 2015"
+output: html_document
+---
+
+## Introduction
+Here I will explore the various activities from data gathered from various activity devices such as *Jawbone Up, Nike Fuelband, and Fitbit*. The goal of this course is to identify the difference between 5 barbell activities, labelled *A, B, C, D, and E*, that were performed by 6 individuals.
+
+First I load the needed libraries and data into the workspace
+``` {r}
+library(caret)
+setwd("~/Documents/Coursera Data Science/Machine Learning/")
+training <- read.csv("pml-training.csv", header = TRUE, na.strings = c("NA", ""))
+testing <- read.csv("pml-testing.csv", header = TRUE, na.strings = c("NA", ""))
+```
+
+Next I check to see if the data is data is clean and complete
+```{r}
+nrow(training)
+csums <- colSums(is.na(training));head(csums, n = 20)
+```
+We can see from the first 20 variables of the data that many of the columns contain almost all *NAs*, and many contain no *NAs*. Columns containing *NA* values will mess with the machine learning algorithm so we will only take columns with no *NA* values. I will also take a look at the column name to see if there are any variables not useful for the identity of the the particular activity
+```{r}
+training2 <- training[, (colSums(is.na(training)) == 0)]
+testing2 <-testing[, (colSums(is.na(training)) == 0)]
+colnames(training2)
+```
+From the column names it seems that the variables *X, timestamp, new_window,* and variables containing the term *timestamp* are unrelated to activity so I will nnot nclude them in the algorithm.
+```{r}
+del_cols_log <- grepl("X|user_name|timestamp|new_window", colnames(training2))
+training2 <- training2[, !del_cols_log]
+testing2 <- testing2[, !del_cols_log]
+```
+Next I will partition the training set into a dataset to train on and one to validate on
+```{r}
+inTrain = createDataPartition(y = training2$classe, p = 0.7, list = FALSE)
+training3 = training2[inTrain, ]
+XvalidSet = training2[-inTrain, ]
+```
+Using the training set I preprocess the datset to include principle component analysis
+```{r}
+preProcTraining <- preProcess(training3[, -54], method = "pca", thresh = 0.99)
+trainP <- predict(preProcTraining, training3[, -54])
+```
+I use the random forest algorithm to try and predict the data
+```{r}
+set.seed(123)
+modelFit <- train(training3$classe ~ ., method = "rf", data = trainP, trControl = trainControl(method = "oob", number = 4), importance = TRUE)
+```
+I perform an error analysis on the fitting model
+```{r}
+plot(modelFit$finalModel, main = "Error Analysis")
+```
+
+Running a confusion matrix on the trainign set should show if we are on the right track
+```{r}
+trainCheck <- predict(modelFit, trainP)
+confusionMatrix(training3$classe, trainCheck)
+```
+It is 100% accurate so that is a reassuring sign. Next we perform the test on the cross-validation dataset.
+```{r}
+validProc <- preProcess(XvalidSet[,-54], method= "pca", thresh = 0.99)
+XvalidSetPC<- predict(validProc, XvalidSet[,-54])
+XvalidCheck <- predict(modelFit, XvalidSetPC)
+ConfMat <- confusionMatrix(XvalidSet$classe, XvalidCheck)
+ConfMat
+ose <- 1- ConfMat$overall[[1]]
+```
+Here I get a model accuracy of `r round(ConfMat$overall[[1]] * 100, digits = 2)`% and a out of sample error of `r ose`. 
+
+The accuracy of this model isn't particularly great. I believe the reason for this is due to oversampling since the error rate does not decrease much as the number of trees goes past around 100, indicating that these increase in trees do not make the model necessarily better and when the data set is changed, for example in the cross validation the model is inaccurate.
+
+## Prediction Results
+The predicted results for the test results are as follows:
+```{r}
+testPred <- predict(preProcTraining, testing2[,-54])
+testPred2 <- predict(modelFit, testPred)
+testPred2
+```
